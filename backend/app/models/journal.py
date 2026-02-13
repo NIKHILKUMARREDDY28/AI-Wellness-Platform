@@ -1,36 +1,40 @@
-"""SQLAlchemy ORM models for journal entries and analysis results."""
+"""Pydantic models for journal entries and analysis results."""
 
 import uuid
 from datetime import datetime
+from typing import Any
 
-from sqlalchemy import JSON, DateTime, Float, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
-
-from app.db.database import Base
+from pydantic import BaseModel, ConfigDict, Field
 
 
 def generate_uuid() -> str:
     return str(uuid.uuid4())
 
 
-class JournalEntry(Base):
-    __tablename__ = "journal_entries"
+class JournalEntry(BaseModel):
+    """Journal entry model."""
+    
+    id: str = Field(default_factory=generate_uuid, alias="_id")
+    title: str = "Untitled"
+    content: str
+    mood_score: float | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
-    title: Mapped[str] = mapped_column(String(255), default="Untitled")
-    content: Mapped[str] = mapped_column(Text, nullable=False)
-    mood_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    # AI analysis results
+    sentiment: dict[str, Any] | None = None
+    patterns: dict[str, Any] | None = None
+    prediction: dict[str, Any] | None = None
+    recommendations: list[dict[str, Any]] | None = None
+    wellness_score: int | None = None
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "title": "My Day",
+                "content": "I had a great day...",
+                "mood_score": 0.8
+            }
+        }
     )
-
-    # AI analysis results (stored as JSON)
-    sentiment: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    patterns: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    prediction: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    recommendations: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    wellness_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-
-    def __repr__(self) -> str:
-        return f"<JournalEntry(id={self.id}, title={self.title})>"
