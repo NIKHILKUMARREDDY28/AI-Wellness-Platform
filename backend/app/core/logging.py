@@ -9,7 +9,7 @@ from app.core.config import settings
 
 def setup_logging() -> logging.Logger:
     """Configure and return the application logger."""
-    log_dir = Path("logs")
+    log_dir = Path("/tmp/logs")
     log_dir.mkdir(exist_ok=True)
 
     logger = logging.getLogger("wellness")
