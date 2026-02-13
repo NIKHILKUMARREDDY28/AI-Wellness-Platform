@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str
+    DATABASE_NAME: str = "ai_wellness"
 
     # Google Gemini
     GOOGLE_API_KEY: str = ""

@@ -1,45 +1,45 @@
 """Analytics service for computing wellness statistics."""
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from pymongo.database import Database
 
 from app.models.journal import JournalEntry
 
 
-async def get_summary(db: AsyncSession) -> dict:
+def get_summary(db: Database) -> dict:
     """Compute aggregate wellness analytics from all journal entries."""
+    collection = db["journal_entries"]
 
     # Total entries
-    total_result = await db.execute(select(func.count(JournalEntry.id)))
-    total_entries = total_result.scalar() or 0
+    total_entries = collection.count_documents({})
 
     # Average wellness score
-    avg_result = await db.execute(
-        select(func.avg(JournalEntry.wellness_score)).where(JournalEntry.wellness_score.isnot(None))
-    )
-    avg_score = avg_result.scalar()
-    wellness_score = int(avg_score) if avg_score else 50
+    pipeline_avg = [
+        {"$match": {"wellness_score": {"$ne": None}}},
+        {"$group": {"_id": None, "avg_score": {"$avg": "$wellness_score"}}}
+    ]
+    avg_result = list(collection.aggregate(pipeline_avg))
+    avg_score = avg_result[0]["avg_score"] if avg_result else 50
+    wellness_score = int(avg_score)
 
-    # Recent entries for trend data
-    recent = await db.execute(
-        select(JournalEntry)
-        .where(JournalEntry.wellness_score.isnot(None))
-        .order_by(JournalEntry.created_at.desc())
-        .limit(7)
-    )
-    recent_entries = list(recent.scalars().all())
+    # Recent entries for trend data (last 7 with scores)
+    recent_cursor = collection.find(
+        {"wellness_score": {"$ne": None}}
+    ).sort("created_at", -1).limit(7)
+    recent_entries = [JournalEntry(**doc) for doc in recent_cursor]
 
     # Stability trend (last 7 entries' wellness scores)
-    stability_trend = [e.wellness_score for e in reversed(recent_entries) if e.wellness_score]
+    stability_trend = [e.wellness_score for e in reversed(recent_entries) if e.wellness_score is not None]
 
-    # Mood distribution from sentiment labels
-    mood_counts: dict[str, int] = {}
-    sentiment_entries = await db.execute(
-        select(JournalEntry).where(JournalEntry.sentiment.isnot(None))
-    )
-    for entry in sentiment_entries.scalars():
-        label = entry.sentiment.get("label", "neutral") if entry.sentiment else "neutral"
-        # Normalize labels to display-friendly names
+    # Mood distribution
+    pipeline_mood = [
+        {"$match": {"sentiment": {"$ne": None}}},
+        {"$group": {"_id": "$sentiment.label", "count": {"$sum": 1}}}
+    ]
+    mood_counts_raw = {doc["_id"]: doc["count"] for doc in collection.aggregate(pipeline_mood)}
+    
+    mood_counts = {}
+    for label, count in mood_counts_raw.items():
+        # Normalize labels
         display_label = {
             "very_positive": "Happy",
             "positive": "Calm",
@@ -47,7 +47,7 @@ async def get_summary(db: AsyncSession) -> dict:
             "negative": "Anxious",
             "very_negative": "Stressed",
         }.get(label, "Okay")
-        mood_counts[display_label] = mood_counts.get(display_label, 0) + 1
+        mood_counts[display_label] = mood_counts.get(display_label, 0) + count
 
     total_moods = sum(mood_counts.values()) or 1
     mood_colors = {
@@ -57,6 +57,7 @@ async def get_summary(db: AsyncSession) -> dict:
         "Anxious": "#a855f7",
         "Stressed": "#ef4444",
     }
+    
     mood_distribution = [
         {
             "label": label,
@@ -66,13 +67,18 @@ async def get_summary(db: AsyncSession) -> dict:
         for label, count in mood_counts.items()
     ]
 
-    # Top stressors aggregated across all entries
+    # Top stressors
+    # Using python aggregation for nested list logic as unwinding might be complex/heavy if arrays are large, 
+    # but strictly speaking PyMongo aggregation is better. For now, matching python logic.
     stressor_freq: dict[str, int] = {}
-    pattern_entries = await db.execute(
-        select(JournalEntry).where(JournalEntry.patterns.isnot(None))
-    )
-    for entry in pattern_entries.scalars():
-        for stressor in (entry.patterns or {}).get("stressors", []):
+    # Fetch entries with patterns
+    pattern_cursor = collection.find({"patterns": {"$ne": None}})
+    for doc in pattern_cursor:
+        patterns = doc.get("patterns", {})
+        if not patterns:
+            continue
+        stressors = patterns.get("stressors", [])
+        for stressor in stressors:
             stressor_freq[stressor] = stressor_freq.get(stressor, 0) + 1
 
     top_stressors = [
@@ -84,8 +90,8 @@ async def get_summary(db: AsyncSession) -> dict:
         for k, v in sorted(stressor_freq.items(), key=lambda x: x[1], reverse=True)[:6]
     ]
 
-    # Streak calculation (consecutive days with entries)
-    current_streak = min(total_entries, 7)  # simplified for now
+    # Streak calculation (placeholder logic from original)
+    current_streak = min(total_entries, 7)
 
     return {
         "wellness_score": wellness_score,

@@ -8,15 +8,24 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import analytics, journal
 from app.core.config import settings
 from app.core.logging import logger
-from app.db.database import init_db
+from app.db.database import get_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup and shutdown lifecycle events."""
     logger.info("🚀 Starting %s ...", settings.APP_NAME)
-    await init_db()
-    logger.info("✅ Database initialized")
+    
+    # Check MongoDB connection
+    try:
+        db = get_db()
+        # Ping the database
+        db.command("ping")
+        logger.info("✅ Database connected (MongoDB)")
+    except Exception as e:
+        logger.error("❌ Database connection failed: %s", e)
+        raise e
+
     yield
     logger.info("👋 Shutting down %s", settings.APP_NAME)
 
@@ -54,3 +63,8 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
